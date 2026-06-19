@@ -15,13 +15,15 @@
 #
 #   SN101_SOLVER_URL=http://<SOLVER_VPS_IP>:7311 \
 #   SN101_SOLVER_API_KEY=0bcf...your-key... \
-#   ./miner-install.sh COLDKEY_NAME HOTKEY_NAME [AXON_PORT]
+#   ./miner-install.sh PM2_NAME COLDKEY_NAME HOTKEY_NAME [AXON_PORT]
 #
 # Examples:
-#   ./miner-install.sh cold1 miner1 8091
-#   ./miner-install.sh cold1 miner2 8092          # adds a second miner on the same VPS
+#   ./miner-install.sh sn101-miner-jinsai25  jinsai25  jinsai25  8091
+#   ./miner-install.sh sn101-miner-jinsai24  jinsai24  jinsai24  8092
+#   ./miner-install.sh miner-A               cold1     hk1       8093   # custom pm2 name
 #
-# Default AXON_PORT is 8091 for the first call, 8092 for the second, etc.
+# AXON_PORT is optional; if omitted, the script picks the next free port
+# starting from 8091.
 #
 # REQUIREMENTS BEFORE RUNNING:
 #   - The hotkey file must already exist at:
@@ -46,11 +48,24 @@ die()  { printf "%s\n" "${CSI}1;31m[FAIL]${CSI}0m         $*" >&2; exit 1; }
 # ---------------------------------------------------------------------------
 # Args + Config
 # ---------------------------------------------------------------------------
-COLDKEY="${1:-}"
-HOTKEY="${2:-}"
-AXON_PORT="${3:-}"
+# Usage:
+#   ./miner-install.sh PM2_NAME COLDKEY HOTKEY [AXON_PORT]
+#
+# PM2_NAME is the pm2 process name (e.g. "sn101-miner-jinsai25" or "miner-A").
+# It also drives the env file path (~/.sn101-miner-<PM2_NAME>.env), the
+# ecosystem file path, and the pm2 log file names. Must be unique per miner
+# on this VPS.
+MINER_NAME="${1:-}"
+COLDKEY="${2:-}"
+HOTKEY="${3:-}"
+AXON_PORT="${4:-}"
 
-[[ -n "$COLDKEY" && -n "$HOTKEY" ]] || die "Usage: $0 COLDKEY HOTKEY [AXON_PORT]"
+[[ -n "$MINER_NAME" && -n "$COLDKEY" && -n "$HOTKEY" ]] || \
+    die "Usage: $0 PM2_NAME COLDKEY HOTKEY [AXON_PORT]"
+
+# Sanity-check the pm2 name: only allow safe filename characters.
+[[ "$MINER_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || \
+    die "PM2_NAME must contain only letters, digits, '.', '_', or '-' (got: $MINER_NAME)"
 
 : "${SN101_SOLVER_URL:?Set SN101_SOLVER_URL env var (e.g. http://<SOLVER_VPS_IP>:7311)}"
 : "${SN101_SOLVER_API_KEY:?Set SN101_SOLVER_API_KEY env var}"
@@ -63,34 +78,19 @@ USER_HOME="$HOME"
 FLEET_DIR="$USER_HOME/sn101-fleet"
 TAG101_DIR="$USER_HOME/tag101"
 VENV_DIR="$USER_HOME/sn101-venv"
-ENV_FILE="$USER_HOME/.sn101-miner-${HOTKEY}.env"
+# Env + ecosystem paths now derive from the pm2 name (not the hotkey) so
+# multiple miners reusing the same hotkey can coexist if you want them to.
+ENV_FILE="$USER_HOME/.sn101-miner-${MINER_NAME}.env"
 WALLET_DIR="$USER_HOME/.bittensor/wallets/$COLDKEY"
 HOTKEY_FILE="$WALLET_DIR/hotkeys/$HOTKEY"
-ECOSYSTEM_DIR="$USER_HOME/sn101-fleet-pm2"   # generated ecosystem files per miner
+ECOSYSTEM_DIR="$USER_HOME/sn101-fleet-pm2"
 
 mkdir -p "$ECOSYSTEM_DIR"
 
 # Pick a default port if not given: 8091, 8092, ...
 if [[ -z "$AXON_PORT" ]]; then
-    used_ports=()
-    if command -v pm2 >/dev/null 2>&1; then
-        while IFS= read -r p; do used_ports+=("$p"); done < <(
-            pm2 jlist 2>/dev/null | python3 -c '
-import sys, json, re
-try:
-    apps = json.load(sys.stdin)
-    for a in apps:
-        if a["name"].startswith("sn101-miner-"):
-            for arg in a["pm2_env"].get("axm_options", {}).get("args", []) or []:
-                m = re.match(r"^\d{4,5}$", str(arg))
-                if m: print(m.group())
-except Exception: pass
-'
-        )
-    fi
     next_port=8091
-    while [[ " ${used_ports[*]} " == *" $next_port "* ]] || \
-          ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$next_port$"; do
+    while ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$next_port$"; do
         next_port=$((next_port + 1))
     done
     AXON_PORT=$next_port
@@ -99,8 +99,6 @@ fi
 
 [[ "$AXON_PORT" =~ ^[0-9]+$ ]] || die "AXON_PORT must be numeric"
 [[ "$AXON_PORT" -ge 1024 && "$AXON_PORT" -le 65535 ]] || die "AXON_PORT out of range"
-
-MINER_NAME="sn101-miner-$HOTKEY"
 
 # ---------------------------------------------------------------------------
 # Preflight
@@ -397,9 +395,10 @@ ${CSI}1;34m---------------------------------------------------------------------
        scp ~/.bittensor/wallets/$COLDKEY/hotkeys/<next-hotkey> \\
            $USER_NAME@$PUBLIC_IP:$WALLET_DIR/hotkeys/
 
-  2. Re-run miner-install.sh — it'll pick the next free port automatically:
+  2. Re-run miner-install.sh — pick a unique pm2 name and (optionally) a port.
+     If the port is omitted, the next free port is picked automatically.
        SN101_SOLVER_URL=$SN101_SOLVER_URL \\
        SN101_SOLVER_API_KEY=<key> \\
-       ./miner-install.sh $COLDKEY <next-hotkey>
+       ./miner-install.sh sn101-miner-<next-hotkey> $COLDKEY <next-hotkey> [<port>]
 
 EOF

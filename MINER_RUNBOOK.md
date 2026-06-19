@@ -107,14 +107,21 @@ with a clear error message telling you where to put the wallet.
 ```bash
 SN101_SOLVER_URL=http://<SOLVER_IP>:7311 \
 SN101_SOLVER_API_KEY=<YOUR_SOLVER_API_KEY> \
-./miner-install.sh <COLDKEY_NAME> <HOTKEY_NAME>
+./miner-install.sh <PM2_NAME> <COLDKEY_NAME> <HOTKEY_NAME> <AXON_PORT>
 ```
 
 Replace:
 - `<SOLVER_IP>` → your solver VPS IP (e.g. `<SOLVER_VPS_IP>`)
 - `<YOUR_SOLVER_API_KEY>` → the 32-byte hex key from your password manager
+- `<PM2_NAME>` → the pm2 process name you want (e.g. `sn101-miner-jinsai25` or any unique label). This drives the env file (`~/.sn101-miner-<PM2_NAME>.env`), the ecosystem file, and the pm2 log file names.
 - `<COLDKEY_NAME>` → your wallet/coldkey directory name (e.g. `jinsai25`)
-- `<HOTKEY_NAME>` → the registered hotkey filename (e.g. `jinsai25` or `miner1`)
+- `<HOTKEY_NAME>` → the registered hotkey filename (e.g. `jinsai25`)
+- `<AXON_PORT>` → port this miner listens on (e.g. `8091`). Optional — omit and the installer picks the next free port.
+
+**Example for the first miner**:
+```bash
+./miner-install.sh sn101-miner-jinsai25 jinsai25 jinsai25 8091
+```
 
 **Expected output**: green "ok" lines through steps 1–4, then:
 
@@ -162,13 +169,14 @@ Back on the VPS:
 ```bash
 SN101_SOLVER_URL=http://<SOLVER_IP>:7311 \
 SN101_SOLVER_API_KEY=<YOUR_SOLVER_API_KEY> \
-./miner-install.sh <COLDKEY_NAME> <HOTKEY_NAME>
+./miner-install.sh <PM2_NAME> <COLDKEY_NAME> <HOTKEY_NAME> <AXON_PORT>
 ```
 
-Same command as Step 4. The installer is idempotent — it skips finished steps,
-verifies the wallet, writes the env file, generates the pm2 ecosystem, opens
-port 8091 in ufw, starts the miner under pm2, saves pm2 state, and installs
-the boot-time systemd hook.
+Same command as Step 4 (e.g. `./miner-install.sh sn101-miner-jinsai25 jinsai25 jinsai25 8091`).
+The installer is idempotent — it skips finished steps, verifies the wallet,
+writes the env file, generates the pm2 ecosystem, opens the chosen port in
+ufw, starts the miner under pm2, saves pm2 state, and installs the boot-time
+systemd hook.
 
 **Expected output** ends with the green box:
 
@@ -235,9 +243,9 @@ confirms the solver is doing the work (no per-query LLM latency on the miner).
 
 ## Adding a second/third miner on the same VPS
 
-Just re-run `miner-install.sh` with a **different hotkey**. The installer
-auto-picks the next free port and creates a fresh per-miner env file +
-ecosystem file:
+Just re-run `miner-install.sh` with a **different pm2 name + different hotkey
++ different port**. The installer creates fresh per-miner env and ecosystem
+files keyed by the pm2 name:
 
 ```bash
 # Upload the second hotkey first:
@@ -247,16 +255,16 @@ scp ~/.bittensor/wallets/<COLDKEY>/hotkeys/<SECOND_HOTKEY> \
 # Then on the VPS:
 SN101_SOLVER_URL=http://<SOLVER_IP>:7311 \
 SN101_SOLVER_API_KEY=<YOUR_SOLVER_API_KEY> \
-./miner-install.sh <COLDKEY> <SECOND_HOTKEY>
+./miner-install.sh <PM2_NAME> <COLDKEY> <SECOND_HOTKEY> <PORT>
 ```
 
 The installer:
 - Skips system deps (already installed)
 - Skips repo cloning (already there)
-- Picks the next free port (8092, then 8093…)
-- Adds a new pm2 entry named `sn101-miner-<SECOND_HOTKEY>`
-- Writes a NEW per-miner env file at `~/.sn101-miner-<SECOND_HOTKEY>.env`
-- Writes a NEW ecosystem at `~/sn101-fleet-pm2/sn101-miner-<SECOND_HOTKEY>.config.cjs`
+- Validates the port is free
+- Adds a new pm2 entry named `<PM2_NAME>`
+- Writes a NEW per-miner env file at `~/.sn101-miner-<PM2_NAME>.env`
+- Writes a NEW ecosystem at `~/sn101-fleet-pm2/<PM2_NAME>.config.cjs`
 - Opens that port in ufw
 - `pm2 save` updates persistence
 
@@ -265,29 +273,33 @@ You can run as many miners per VPS as your CPU/RAM allow. Each miner adds
 
 ### Example: running 3 miners on one VPS
 
-After running `miner-install.sh` three times with three different hotkeys:
+After running `miner-install.sh` three times:
 
 ```bash
 SN101_SOLVER_URL=http://<SOLVER_IP>:7311 SN101_SOLVER_API_KEY=<KEY> \
-    ./miner-install.sh jinsai25 jinsai25         # picks 8091
+    ./miner-install.sh sn101-miner-jinsai25  jinsai25  jinsai25  8091
 SN101_SOLVER_URL=http://<SOLVER_IP>:7311 SN101_SOLVER_API_KEY=<KEY> \
-    ./miner-install.sh jinsai25 minerA           # picks 8092
+    ./miner-install.sh sn101-miner-minerA    jinsai25  minerA    8092
 SN101_SOLVER_URL=http://<SOLVER_IP>:7311 SN101_SOLVER_API_KEY=<KEY> \
-    ./miner-install.sh jinsai25 minerB           # picks 8093
+    ./miner-install.sh sn101-miner-minerB    jinsai25  minerB    8093
 ```
 
 Result — each miner is fully independent:
 
 ```
 /home/ubuntu/
-├── .sn101-miner-jinsai25.env       # SN101_COLDKEY=jinsai25, SN101_HOTKEY=jinsai25, SN101_AXON_PORT=8091
-├── .sn101-miner-minerA.env         # SN101_COLDKEY=jinsai25, SN101_HOTKEY=minerA,   SN101_AXON_PORT=8092
-├── .sn101-miner-minerB.env         # SN101_COLDKEY=jinsai25, SN101_HOTKEY=minerB,   SN101_AXON_PORT=8093
+├── .sn101-miner-sn101-miner-jinsai25.env  # SN101_COLDKEY=jinsai25, SN101_HOTKEY=jinsai25, SN101_AXON_PORT=8091
+├── .sn101-miner-sn101-miner-minerA.env    # SN101_COLDKEY=jinsai25, SN101_HOTKEY=minerA,   SN101_AXON_PORT=8092
+├── .sn101-miner-sn101-miner-minerB.env    # SN101_COLDKEY=jinsai25, SN101_HOTKEY=minerB,   SN101_AXON_PORT=8093
 └── sn101-fleet-pm2/
-    ├── sn101-miner-jinsai25.config.cjs   # → reads .sn101-miner-jinsai25.env
-    ├── sn101-miner-minerA.config.cjs     # → reads .sn101-miner-minerA.env
-    └── sn101-miner-minerB.config.cjs     # → reads .sn101-miner-minerB.env
+    ├── sn101-miner-jinsai25.config.cjs    # → reads matching env file
+    ├── sn101-miner-minerA.config.cjs      # → reads matching env file
+    └── sn101-miner-minerB.config.cjs      # → reads matching env file
 ```
+
+(Tip: pick shorter pm2 names to keep the env-file paths readable. E.g. use
+`miner-A` instead of `sn101-miner-minerA` — the installer doesn't care, and
+the file becomes `~/.sn101-miner-miner-A.env`.)
 
 And `pm2 list` shows:
 
@@ -306,7 +318,7 @@ Each miner can be operated independently:
 pm2 restart sn101-miner-minerA
 
 # Change one miner's port without affecting others — edit its env file then:
-nano ~/.sn101-miner-minerA.env       # change SN101_AXON_PORT=8094
+nano ~/.sn101-miner-sn101-miner-minerA.env       # change SN101_AXON_PORT=8094
 sudo ufw allow 8094/tcp
 pm2 restart sn101-miner-minerA --update-env
 
