@@ -22,8 +22,8 @@
 #   ./miner-install.sh sn101-miner-jinsai24  jinsai24  jinsai24  8092
 #   ./miner-install.sh miner-A               cold1     hk1       8093   # custom pm2 name
 #
-# AXON_PORT is optional; if omitted, the script picks the next free port
-# starting from 8091.
+# All four args are REQUIRED. PORT is no longer auto-picked — declare it
+# explicitly so it's obvious which miner is on which port at install time.
 #
 # REQUIREMENTS BEFORE RUNNING:
 #   - The hotkey file must already exist at:
@@ -60,12 +60,21 @@ COLDKEY="${2:-}"
 HOTKEY="${3:-}"
 AXON_PORT="${4:-}"
 
-[[ -n "$MINER_NAME" && -n "$COLDKEY" && -n "$HOTKEY" ]] || \
-    die "Usage: $0 PM2_NAME COLDKEY HOTKEY [AXON_PORT]"
+# All four args are required. Without explicit PORT we'd risk silently using
+# the old 3-arg layout where someone passes "coldkey hotkey port" and it gets
+# interpreted as "pm2_name coldkey hotkey".
+[[ -n "$MINER_NAME" && -n "$COLDKEY" && -n "$HOTKEY" && -n "$AXON_PORT" ]] || \
+    die "Usage: $0 PM2_NAME COLDKEY HOTKEY AXON_PORT
+Example: $0 sn101-miner-jinsai25 jinsai25 jinsai25 8091"
 
 # Sanity-check the pm2 name: only allow safe filename characters.
 [[ "$MINER_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || \
     die "PM2_NAME must contain only letters, digits, '.', '_', or '-' (got: $MINER_NAME)"
+
+# Sanity-check the hotkey name doesn't look like a port (catches old 3-arg invocations)
+[[ ! "$HOTKEY" =~ ^[0-9]+$ ]] || \
+    die "HOTKEY looks like a port ($HOTKEY). You probably used the old 3-arg form. \
+The new form is: PM2_NAME COLDKEY HOTKEY PORT"
 
 : "${SN101_SOLVER_URL:?Set SN101_SOLVER_URL env var (e.g. http://<SOLVER_VPS_IP>:7311)}"
 : "${SN101_SOLVER_API_KEY:?Set SN101_SOLVER_API_KEY env var}"
@@ -87,18 +96,8 @@ ECOSYSTEM_DIR="$USER_HOME/sn101-fleet-pm2"
 
 mkdir -p "$ECOSYSTEM_DIR"
 
-# Pick a default port if not given: 8091, 8092, ...
-if [[ -z "$AXON_PORT" ]]; then
-    next_port=8091
-    while ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$next_port$"; do
-        next_port=$((next_port + 1))
-    done
-    AXON_PORT=$next_port
-    log "AXON_PORT not provided, picked next free port: $AXON_PORT"
-fi
-
-[[ "$AXON_PORT" =~ ^[0-9]+$ ]] || die "AXON_PORT must be numeric"
-[[ "$AXON_PORT" -ge 1024 && "$AXON_PORT" -le 65535 ]] || die "AXON_PORT out of range"
+[[ "$AXON_PORT" =~ ^[0-9]+$ ]] || die "AXON_PORT must be numeric (got: $AXON_PORT)"
+[[ "$AXON_PORT" -ge 1024 && "$AXON_PORT" -le 65535 ]] || die "AXON_PORT out of range (got: $AXON_PORT)"
 
 # ---------------------------------------------------------------------------
 # Preflight

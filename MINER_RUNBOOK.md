@@ -116,7 +116,7 @@ Replace:
 - `<PM2_NAME>` → the pm2 process name you want (e.g. `sn101-miner-jinsai25` or any unique label). This drives the env file (`~/.sn101-miner-<PM2_NAME>.env`), the ecosystem file, and the pm2 log file names.
 - `<COLDKEY_NAME>` → your wallet/coldkey directory name (e.g. `jinsai25`)
 - `<HOTKEY_NAME>` → the registered hotkey filename (e.g. `jinsai25`)
-- `<AXON_PORT>` → port this miner listens on (e.g. `8091`). Optional — omit and the installer picks the next free port.
+- `<AXON_PORT>` → port this miner listens on (e.g. `8091`). **Required** — declare it explicitly so it's obvious which miner is on which port.
 
 **Example for the first miner**:
 ```bash
@@ -627,8 +627,9 @@ Three properties this layout guarantees:
 1. **Per-miner isolation.** Editing `~/.sn101-miner-<HOTKEY_1>.env` and running
    `pm2 restart sn101-miner-<HOTKEY_1> --update-env` affects ONLY that one
    miner. The others keep running with their own config.
-2. **No port conflicts.** Each `.env` declares its own `SN101_AXON_PORT`; the
-   installer picks the next free port automatically when you add a new miner.
+2. **No port conflicts.** Each `.env` declares its own `SN101_AXON_PORT`. The
+   installer refuses to start if the port you specified is already in use, so
+   you can't accidentally double-bind.
 3. **Self-contained config.** Looking at one `.env` file tells you everything
    that miner does: which wallet, which port, which solver, which key.
 
