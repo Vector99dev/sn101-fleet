@@ -13,7 +13,7 @@
 #
 # Usage — one miner per invocation. Re-run for additional hotkeys on the same VPS.
 #
-#   SN101_SOLVER_URL=http://40.160.250.67:7311 \
+#   SN101_SOLVER_URL=http://<SOLVER_VPS_IP>:7311 \
 #   SN101_SOLVER_API_KEY=0bcf...your-key... \
 #   ./miner-install.sh COLDKEY_NAME HOTKEY_NAME [AXON_PORT]
 #
@@ -52,7 +52,7 @@ AXON_PORT="${3:-}"
 
 [[ -n "$COLDKEY" && -n "$HOTKEY" ]] || die "Usage: $0 COLDKEY HOTKEY [AXON_PORT]"
 
-: "${SN101_SOLVER_URL:?Set SN101_SOLVER_URL env var (e.g. http://40.160.250.67:7311)}"
+: "${SN101_SOLVER_URL:?Set SN101_SOLVER_URL env var (e.g. http://<SOLVER_VPS_IP>:7311)}"
 : "${SN101_SOLVER_API_KEY:?Set SN101_SOLVER_API_KEY env var}"
 : "${SN101_SUBTENSOR_NETWORK:=finney}"
 : "${SN101_REPO_URL:=https://github.com/Vector99dev/sn101-fleet.git}"
