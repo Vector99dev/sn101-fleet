@@ -53,8 +53,13 @@ export TASK_MINER_MODULE="${TASK_MINER_MODULE:-thin_miner}"
 
 cd "$TAG101_DIR"
 
+# Use our wrapper (FLEET_DIR/run_miner.py) instead of `-m tag101.miner` so
+# the IP-hide patch can install before tag101 instantiates ChainRuntime.
+# Set SN101_HIDE_AXON_IP=0 in the env file to bypass and use vanilla tag101.
+export SN101_HIDE_AXON_IP="${SN101_HIDE_AXON_IP:-1}"
+
 # exec so pm2 supervises the python process directly
-exec "$VENV_BIN/python" -m tag101.miner \
+exec "$VENV_BIN/python" "$FLEET_DIR/run_miner.py" \
     --netuid 101 \
     --subtensor.network "$SUBTENSOR_NETWORK" \
     --wallet.name "$SN101_COLDKEY" \
