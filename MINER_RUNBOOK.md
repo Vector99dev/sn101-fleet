@@ -5,6 +5,14 @@
 
 This is the **miner-side** runbook. For solver setup see [RUNBOOK.md](./RUNBOOK.md).
 
+> [!NOTE]
+> **Multi-miner-per-VPS model.** Each miner you install gets its own dedicated
+> config files: one env file (`~/.sn101-miner-<HOTKEY>.env`) and one pm2 ecosystem
+> file (`~/sn101-fleet-pm2/sn101-miner-<HOTKEY>.config.cjs`). Different miners
+> never share config. You can run as many miners per VPS as your CPU/RAM allow —
+> each runs on its own port (8091, 8092, 8093…), with its own coldkey/hotkey, on
+> its own pm2 process. See the [multi-miner example](#example-running-3-miners-on-one-vps).
+
 ---
 
 ## At a glance
@@ -228,7 +236,8 @@ confirms the solver is doing the work (no per-query LLM latency on the miner).
 ## Adding a second/third miner on the same VPS
 
 Just re-run `miner-install.sh` with a **different hotkey**. The installer
-auto-picks the next free port:
+auto-picks the next free port and creates a fresh per-miner env file +
+ecosystem file:
 
 ```bash
 # Upload the second hotkey first:
@@ -246,11 +255,103 @@ The installer:
 - Skips repo cloning (already there)
 - Picks the next free port (8092, then 8093…)
 - Adds a new pm2 entry named `sn101-miner-<SECOND_HOTKEY>`
+- Writes a NEW per-miner env file at `~/.sn101-miner-<SECOND_HOTKEY>.env`
+- Writes a NEW ecosystem at `~/sn101-fleet-pm2/sn101-miner-<SECOND_HOTKEY>.config.cjs`
 - Opens that port in ufw
 - `pm2 save` updates persistence
 
 You can run as many miners per VPS as your CPU/RAM allow. Each miner adds
 ~130 MB RAM and a tiny bit of CPU (most work is on the solver).
+
+### Example: running 3 miners on one VPS
+
+After running `miner-install.sh` three times with three different hotkeys:
+
+```bash
+SN101_SOLVER_URL=http://<SOLVER_IP>:7311 SN101_SOLVER_API_KEY=<KEY> \
+    ./miner-install.sh jinsai25 jinsai25         # picks 8091
+SN101_SOLVER_URL=http://<SOLVER_IP>:7311 SN101_SOLVER_API_KEY=<KEY> \
+    ./miner-install.sh jinsai25 minerA           # picks 8092
+SN101_SOLVER_URL=http://<SOLVER_IP>:7311 SN101_SOLVER_API_KEY=<KEY> \
+    ./miner-install.sh jinsai25 minerB           # picks 8093
+```
+
+Result — each miner is fully independent:
+
+```
+/home/ubuntu/
+├── .sn101-miner-jinsai25.env       # SN101_COLDKEY=jinsai25, SN101_HOTKEY=jinsai25, SN101_AXON_PORT=8091
+├── .sn101-miner-minerA.env         # SN101_COLDKEY=jinsai25, SN101_HOTKEY=minerA,   SN101_AXON_PORT=8092
+├── .sn101-miner-minerB.env         # SN101_COLDKEY=jinsai25, SN101_HOTKEY=minerB,   SN101_AXON_PORT=8093
+└── sn101-fleet-pm2/
+    ├── sn101-miner-jinsai25.config.cjs   # → reads .sn101-miner-jinsai25.env
+    ├── sn101-miner-minerA.config.cjs     # → reads .sn101-miner-minerA.env
+    └── sn101-miner-minerB.config.cjs     # → reads .sn101-miner-minerB.env
+```
+
+And `pm2 list` shows:
+
+```
+│ id │ name                    │ status │ port  │
+├────┼─────────────────────────┼────────┼───────┤
+│  0 │ sn101-miner-jinsai25    │ online │ 8091  │
+│  1 │ sn101-miner-minerA      │ online │ 8092  │
+│  2 │ sn101-miner-minerB      │ online │ 8093  │
+```
+
+Each miner can be operated independently:
+
+```bash
+# Restart just one miner
+pm2 restart sn101-miner-minerA
+
+# Change one miner's port without affecting others — edit its env file then:
+nano ~/.sn101-miner-minerA.env       # change SN101_AXON_PORT=8094
+sudo ufw allow 8094/tcp
+pm2 restart sn101-miner-minerA --update-env
+
+# Point one miner at a different solver (e.g. for testing) without affecting others
+nano ~/.sn101-miner-minerB.env       # change SN101_SOLVER_URL=http://test-solver:7311
+pm2 restart sn101-miner-minerB --update-env
+```
+
+### Inside a per-miner env file
+
+Each `~/.sn101-miner-<HOTKEY>.env` is self-contained:
+
+```bash
+# Common settings (typically identical across miners on the same VPS)
+TASK_MINER_MODULE=thin_miner
+SN101_SOLVER_URL=http://<SOLVER_IP>:7311
+SN101_SOLVER_API_KEY=<32-byte hex>
+SN101_SOLVER_TIMEOUT_S=5.0
+SN101_VENV_BIN=/home/ubuntu/sn101-venv/bin
+SN101_TAG101_DIR=/home/ubuntu/tag101
+SN101_FLEET_DIR=/home/ubuntu/sn101-fleet
+SN101_SUBTENSOR_NETWORK=finney
+SN101_LOG_LEVEL=--logging.info
+
+# Per-miner identity (these MUST differ between miners on the same VPS)
+SN101_COLDKEY=<this miner's coldkey>
+SN101_HOTKEY=<this miner's hotkey>
+SN101_AXON_PORT=<this miner's unique port>
+```
+
+The pm2 ecosystem just points at this file — no args, no duplication:
+
+```javascript
+module.exports = {
+  apps: [{
+    name: "sn101-miner-<HOTKEY>",
+    script: "/home/ubuntu/sn101-fleet/deploy/start-miner.sh",
+    interpreter: "bash",
+    env: {
+      SN101_MINER_ENV: "/home/ubuntu/.sn101-miner-<HOTKEY>.env"
+    },
+    // ... reliability knobs ...
+  }]
+};
+```
 
 ---
 
@@ -330,10 +431,17 @@ Symptom: `pm2 logs sn101-miner-<HOTKEY>` shows `solver call failed: 401 Unauthor
 and `MINER_SOLVED_TASK` lines show `answer_keys=['tags']` but the tags are always
 `['ai', 'tech', 'release']` (the safe defaults).
 
-Fix: update the env file with the correct key:
+Fix: update the per-miner env file with the correct key:
 ```bash
-sudo nano /home/ubuntu/.sn101-miner.env
+nano /home/ubuntu/.sn101-miner-<HOTKEY>.env
 # Update SN101_SOLVER_API_KEY=...
+pm2 restart sn101-miner-<HOTKEY> --update-env
+```
+
+If you have multiple miners and want to update them all at once:
+```bash
+sed -i "s|^SN101_SOLVER_API_KEY=.*|SN101_SOLVER_API_KEY=<NEW_KEY>|" \
+    /home/ubuntu/.sn101-miner-*.env
 pm2 restart all --update-env
 ```
 
@@ -403,10 +511,20 @@ pm2 delete sn101-miner-<HOTKEY>
 pm2 save                                         # persist removal
 ```
 
-### See the env file
+### See a miner's env file
 
 ```bash
-cat /home/ubuntu/.sn101-miner.env
+cat /home/ubuntu/.sn101-miner-<HOTKEY>.env
+```
+
+Edit it directly (`nano /home/ubuntu/.sn101-miner-<HOTKEY>.env`) to change that
+miner's port, coldkey, solver URL, or solver key — then `pm2 restart
+sn101-miner-<HOTKEY> --update-env`. Only that miner is affected.
+
+### List all per-miner env files on this VPS
+
+```bash
+ls -la /home/ubuntu/.sn101-miner-*.env
 ```
 
 ### Inspect the pm2 ecosystem for this miner
@@ -442,9 +560,10 @@ sudo sed -i "s/^SOLVER_API_KEY=.*/SOLVER_API_KEY=<NEW_KEY>/" /home/ubuntu/.sn101
 pm2 restart sn101-solver --update-env
 ```
 
-Then **on every miner VPS** (within a minute):
+Then **on every miner VPS** (within a minute) — updates ALL per-miner env
+files in one command:
 ```bash
-sudo sed -i "s/^SN101_SOLVER_API_KEY=.*/SN101_SOLVER_API_KEY=<NEW_KEY>/" /home/ubuntu/.sn101-miner.env
+sed -i "s|^SN101_SOLVER_API_KEY=.*|SN101_SOLVER_API_KEY=<NEW_KEY>|" /home/ubuntu/.sn101-miner-*.env
 pm2 restart all --update-env
 ```
 
@@ -455,36 +574,51 @@ under 10 seconds — barely noticeable.
 
 ## Repo layout (what's where on the miner VPS)
 
-After `miner-install.sh` finishes, the VPS looks like this:
+After `miner-install.sh` finishes (with two miners as the example), the VPS
+looks like this:
 
 ```
 /home/ubuntu/
-├── sn101-fleet/                         # cloned from your GitHub
-│   ├── thin_miner.py                    # imported by tag101.miner at startup
-│   ├── deploy/start-miner.sh            # pm2 wrapper
-│   └── miner-install.sh                 # the installer you ran
+├── sn101-fleet/                                # cloned from your GitHub
+│   ├── thin_miner.py                           # imported by tag101.miner at startup
+│   ├── deploy/start-miner.sh                   # pm2 wrapper (reads env, no args)
+│   └── miner-install.sh                        # the installer you ran
 │
-├── tag101/                              # cloned from tag101-ai/tag101
-│   ├── miner.py                         # entry point
-│   ├── tasks/sn101.py                   # default handler (we override this)
-│   └── chain/                           # bittensor wallet/axon plumbing
+├── tag101/                                     # cloned from tag101-ai/tag101
+│   ├── miner.py                                # entry point
+│   ├── tasks/sn101.py                          # default handler (we override this)
+│   └── chain/                                  # bittensor wallet/axon plumbing
 │
-├── sn101-venv/                          # Python venv (bittensor + httpx)
+├── sn101-venv/                                 # Python venv (bittensor + httpx)
 │
-├── sn101-fleet-pm2/                     # generated pm2 ecosystem files
-│   └── sn101-miner-<HOTKEY>.config.cjs
+├── sn101-fleet-pm2/                            # one ecosystem PER miner
+│   ├── sn101-miner-<HOTKEY_1>.config.cjs       # → .sn101-miner-<HOTKEY_1>.env
+│   └── sn101-miner-<HOTKEY_2>.config.cjs       # → .sn101-miner-<HOTKEY_2>.env
 │
-├── .sn101-miner.env                     # env file with solver URL + key
+├── .sn101-miner-<HOTKEY_1>.env                 # SELF-CONTAINED per-miner config
+├── .sn101-miner-<HOTKEY_2>.env                 # SELF-CONTAINED per-miner config
+│   # Each contains: SN101_COLDKEY, SN101_HOTKEY, SN101_AXON_PORT, solver URL+key, paths
 │
-├── .bittensor/                          # bittensor's data directory
+├── .bittensor/                                 # bittensor's data directory
 │   ├── wallets/<COLDKEY>/
 │   │   ├── coldkeypub.txt
-│   │   └── hotkeys/<HOTKEY>
-│   └── sn101/<HOTKEY>/                  # per-miner state (scoreboard etc.)
+│   │   └── hotkeys/<HOTKEY_1>, <HOTKEY_2>
+│   └── sn101/<HOTKEY_1>/, sn101/<HOTKEY_2>/    # per-miner state directories
 │
-└── .pm2/                                # pm2 daemon state
-    └── logs/sn101-miner-<HOTKEY>-{out,err}.log
+└── .pm2/                                       # pm2 daemon state
+    └── logs/sn101-miner-<HOTKEY_1>-{out,err}.log
+    └── logs/sn101-miner-<HOTKEY_2>-{out,err}.log
 ```
+
+Three properties this layout guarantees:
+
+1. **Per-miner isolation.** Editing `~/.sn101-miner-<HOTKEY_1>.env` and running
+   `pm2 restart sn101-miner-<HOTKEY_1> --update-env` affects ONLY that one
+   miner. The others keep running with their own config.
+2. **No port conflicts.** Each `.env` declares its own `SN101_AXON_PORT`; the
+   installer picks the next free port automatically when you add a new miner.
+3. **Self-contained config.** Looking at one `.env` file tells you everything
+   that miner does: which wallet, which port, which solver, which key.
 
 ---
 
