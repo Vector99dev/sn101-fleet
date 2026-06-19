@@ -184,6 +184,8 @@ fi
 
 "$VENV_DIR/bin/pip" install --quiet --retries 5 --timeout 120 httpx pydantic
 "$VENV_DIR/bin/pip" install --quiet --retries 8 --timeout 300 bittensor
+# tag101's miner module imports these — bittensor doesn't auto-pull them
+"$VENV_DIR/bin/pip" install --quiet --retries 5 --timeout 120 munch tenacity aiohttp
 ok "Python deps installed"
 
 # Sanity-import everything that thin_miner needs at runtime.
