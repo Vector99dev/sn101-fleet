@@ -34,8 +34,12 @@ NEUTRON_LOG="${SN101_LOG_LEVEL:---logging.info}"
 STORAGE_DIR="${SN101_STORAGE_DIR:-/home/ubuntu/.bittensor/sn101}/${HOTKEY}"
 mkdir -p "$STORAGE_DIR"
 
-# Make tag101 and sn101-fleet importable, and ensure thin_miner is on the path
-export PYTHONPATH="${TAG101_DIR}:${FLEET_DIR}:${PYTHONPATH:-}"
+# Make tag101 and sn101-fleet importable.
+# tag101 package directory is INSIDE $TAG101_DIR, so PYTHONPATH needs its parent
+# so `import tag101` resolves. $FLEET_DIR goes directly on PYTHONPATH so
+# `import thin_miner` resolves (thin_miner.py lives at the top of $FLEET_DIR).
+TAG101_PARENT="$(dirname "$TAG101_DIR")"
+export PYTHONPATH="${TAG101_PARENT}:${FLEET_DIR}:${PYTHONPATH:-}"
 export TASK_MINER_MODULE="${TASK_MINER_MODULE:-thin_miner}"
 
 cd "$TAG101_DIR"

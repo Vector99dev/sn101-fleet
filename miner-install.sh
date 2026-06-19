@@ -186,14 +186,19 @@ fi
 "$VENV_DIR/bin/pip" install --quiet --retries 8 --timeout 300 bittensor
 ok "Python deps installed"
 
-# Sanity-import everything that thin_miner needs at runtime
-PYTHONPATH="$TAG101_DIR:$FLEET_DIR" "$VENV_DIR/bin/python" - <<'PY' || die "Import sanity check failed"
+# Sanity-import everything that thin_miner needs at runtime.
+# Note: PYTHONPATH needs the PARENT of $TAG101_DIR (so `import tag101` works)
+# plus $FLEET_DIR (so `import thin_miner` works).
+TAG101_PARENT="$(dirname "$TAG101_DIR")"
+PYTHONPATH="$TAG101_PARENT:$FLEET_DIR" "$VENV_DIR/bin/python" - <<'PY' || die "Import sanity check failed"
 import bittensor, httpx
 from tag101.tasks import build_task_registry
 from tag101.protocol import TaskEnvelope
+import thin_miner
 print(f"  bittensor={bittensor.__version__}")
 print(f"  httpx={httpx.__version__}")
 print(f"  tag101 task registry: OK")
+print(f"  thin_miner: OK")
 PY
 ok "All imports verified"
 
