@@ -57,15 +57,19 @@ class SolverClient:
             self._client = httpx.Client(timeout=self.timeout, headers=headers)
         return self._client
 
-    def solve(self, tweet: str) -> list[str]:
+    def solve(self, tweet: str) -> dict[str, Any]:
+        """Return {"tags": [...], "path": "...", "latency_ms": ...} from the solver."""
         client = self._get_client()
         r = client.post(f"{self.base_url}/solve", json={"tweet": tweet})
         r.raise_for_status()
         body = r.json()
-        tags = body.get("tags", [])
-        if not isinstance(tags, list):
-            return []
-        return [str(t) for t in tags if isinstance(t, str)]
+        raw_tags = body.get("tags", [])
+        tags = [str(t) for t in raw_tags if isinstance(t, str)] if isinstance(raw_tags, list) else []
+        return {
+            "tags": tags,
+            "path": str(body.get("path", "?")),
+            "latency_ms": float(body.get("latency_ms", 0.0) or 0.0),
+        }
 
     def close(self) -> None:
         if self._client is not None:
@@ -77,6 +81,36 @@ class SolverClient:
 _client = SolverClient()
 
 
+def _log_response(
+    *,
+    task_id: str,
+    tweet: str,
+    tags: list[str],
+    path: str,
+    solver_ms: float,
+) -> None:
+    """Emit a human-readable line to the miner's logs with the actual tags.
+
+    Tag101's miner only logs `answer_keys=['tags']`, which doesn't show what
+    we returned. This adds a parallel `THIN_MINER_RESPONSE` line so the
+    operator can see the real values in `pm2 logs`.
+    """
+    tweet_snippet = (tweet[:80] + "…") if len(tweet) > 80 else tweet
+    line = (
+        f"THIN_MINER_RESPONSE task={task_id} "
+        f"path={path} solver_ms={solver_ms:.0f} "
+        f"tags={tags} tweet={tweet_snippet!r}"
+    )
+    try:
+        import bittensor as bt  # imported here so test contexts without bt still work
+
+        bt.logging.info(line)
+    except Exception:
+        # Fallback path (e.g. running thin_miner tests without bittensor installed).
+        # Print goes to stdout, which pm2 captures.
+        print(line, flush=True)
+
+
 def solve_problem(envelope: Any, _runtime: Any) -> dict[str, Any]:
     """Drop-in replacement for tag101.tasks.sn101.solve_problem.
 
@@ -85,18 +119,34 @@ def solve_problem(envelope: Any, _runtime: Any) -> dict[str, Any]:
     """
     payload = dict(getattr(envelope, "payload", {}) or {})
     tweet = str(payload.get("text", ""))
-    if not tweet:
-        return {"tags": list(SAFE_DEFAULT_TAGS)}
+    task_id = str(getattr(envelope, "task_id", "?"))
 
+    if not tweet:
+        result = list(SAFE_DEFAULT_TAGS)
+        _log_response(task_id=task_id, tweet="", tags=result,
+                      path="no_tweet", solver_ms=0.0)
+        return {"tags": result}
+
+    path = "?"
+    solver_ms = 0.0
     try:
-        tags = _client.solve(tweet)
+        body = _client.solve(tweet)
+        tags = list(body["tags"])
+        path = body["path"]
+        solver_ms = body["latency_ms"]
     except Exception as exc:
         logger.warning("solver call failed: %s", exc)
         tags = list(SAFE_DEFAULT_TAGS)
+        path = "client_error"
 
     if not tags:
         tags = list(SAFE_DEFAULT_TAGS)
-    return {"tags": tags[:3]}
+        path = f"{path}+empty_fallback"
+
+    final_tags = tags[:3]
+    _log_response(task_id=task_id, tweet=tweet, tags=final_tags,
+                  path=path, solver_ms=solver_ms)
+    return {"tags": final_tags}
 
 
 def score_answers(
