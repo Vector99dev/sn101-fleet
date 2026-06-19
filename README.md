@@ -152,6 +152,13 @@ See [`RUNBOOK.md`](./RUNBOOK.md) — it documents the entire manual install
 sequence step by step, troubleshooting for the six most common failures, and how
 to rebuild everything from this repo on a fresh VPS if the installer breaks.
 
+## Adding miner VPSes to the fleet
+
+See [`MINER_RUNBOOK.md`](./MINER_RUNBOOK.md) — step-by-step instructions for
+deploying a new miner that connects to your existing solver: 7 commands per
+VPS, verification checklist, multi-miner-per-VPS pattern, troubleshooting,
+and the security cleanup that removes the coldkey from the VPS after install.
+
 ---
 
 ## License
