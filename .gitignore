@@ -1,0 +1,9 @@
+__pycache__/
+*.py[co]
+.env
+.sn101.env
+*.tar.gz
+.venv/
+venv/
+.pm2/
+*.log
