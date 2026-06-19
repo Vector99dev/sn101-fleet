@@ -233,11 +233,23 @@ ok "Hotkey present at $HOTKEY_FILE"
 # Verify the hotkey loads under bittensor (catches malformed files early)
 "$VENV_DIR/bin/python" - <<PY || die "Bittensor cannot load the hotkey (file malformed?)"
 import bittensor as bt
-w = bt.wallet(name="$COLDKEY", hotkey="$HOTKEY")
-ss58 = w.hotkey.ss58_address
-print(f"  hotkey ss58: {ss58}")
+# bittensor 10+ uses Wallet (capital W); older versions used wallet (lower w).
+WalletCls = getattr(bt, "Wallet", None) or getattr(bt, "wallet")
+w = WalletCls(name="$COLDKEY", hotkey="$HOTKEY")
+print(f"  hotkey ss58: {w.hotkey.ss58_address}")
+try:
+    print(f"  coldkey ss58: {w.coldkeypub.ss58_address}")
+except Exception as e:
+    print(f"  (coldkey marker not loadable: {e})")
 PY
 ok "Bittensor loaded the hotkey"
+
+# Harden wallet perms (private files chmod 600, dirs chmod 700)
+chmod 700 "$USER_HOME/.bittensor" 2>/dev/null || true
+chmod 700 "$WALLET_DIR" "$WALLET_DIR/hotkeys" 2>/dev/null || true
+[[ -f "$WALLET_DIR/coldkey" ]] && chmod 600 "$WALLET_DIR/coldkey"
+chmod 600 "$HOTKEY_FILE"
+ok "Wallet permissions hardened"
 
 # ---------------------------------------------------------------------------
 # Step 6 — Write env file (idempotent — overwrite is fine, same content each time)
