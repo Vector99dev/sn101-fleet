@@ -584,6 +584,78 @@ under 10 seconds — barely noticeable.
 
 ---
 
+## On-chain IP hiding (anti-DDoS / anti-fingerprint)
+
+By default (`SN101_HIDE_AXON_IP=1`), each miner publishes
+`IP=0.0.0.0:<your_port>` to the SN101 metagraph instead of its real
+public IP. Validators still find the miner via the **private axon
+announcement** sent to the task server at startup (the
+`MINER_PRIVATE_AXON_ANNOUNCED` line you see in miner logs).
+
+| | Before | After |
+|---|--------|-------|
+| `btcli subnet metagraph --netuid 101` shows | real IP + port | **0.0.0.0 + port** |
+| Validators reach the miner | via metagraph IP | via task-server private-axon table |
+| Random internet scanner can find the miner | yes (knows IP) | **no** — chain no longer points at you |
+
+This matches the pattern used by ~150 other SN101 miners. The chain
+rejects port=0, so the port stays visible — but it's harmless without
+the IP.
+
+### Implementation
+
+[`run_miner.py`](./run_miner.py) is a thin wrapper that monkey-patches
+`ChainRuntime.serve_axon` to publish `0.0.0.0:<real_port>` instead of
+the real IP. The local axon still binds and serves on the real port,
+so validator queries arrive normally.
+
+### Verify after install
+
+```bash
+~/sn101-venv/bin/python -c "
+import bittensor as bt, sys
+mg = bt.Subtensor(network='finney').metagraph(netuid=101, lite=False)
+for uid in sys.argv[1:]:
+    ax = mg.axons[int(uid)]
+    ip = str(ax.ip) or '0.0.0.0'
+    port = int(ax.port)
+    status = 'HIDDEN' if ip == '0.0.0.0' else 'VISIBLE'
+    print(f'UID {uid}: IP={ip} PORT={port} -> {status}')
+" 158 166 171
+```
+
+You should see `IP=0.0.0.0 PORT=<your_port> -> HIDDEN` for each UID you control.
+
+### Migrating already-running miners to hidden mode
+
+If you previously installed miners that show real IPs in the metagraph:
+
+```bash
+# 1. Pull the latest code on each VPS
+cd ~/sn101-fleet && git pull origin main
+
+# 2. Restart every running miner so the new wrapper takes effect
+pm2 restart all --update-env
+
+# 3. Wait ~30s per miner for the on-chain serve_axon to land, then verify above
+```
+
+You'll see `[run_miner] published 0.0.0.0:<port> to chain — IP hidden`
+in each miner's logs once the chain transaction has been included.
+
+### Disable (testing only)
+
+If you ever need vanilla tag101 behavior (publish real IP), set in the
+per-miner env file:
+
+```bash
+SN101_HIDE_AXON_IP=0
+```
+
+then `pm2 restart <name> --update-env`. Not recommended in production.
+
+---
+
 ## Repo layout (what's where on the miner VPS)
 
 After `miner-install.sh` finishes (with two miners as the example), the VPS
