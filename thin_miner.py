@@ -24,6 +24,13 @@ logger = logging.getLogger("sn101.thin_miner")
 SOLVER_URL = os.environ.get("SN101_SOLVER_URL", "http://127.0.0.1:7311")
 SOLVER_TIMEOUT_S = float(os.environ.get("SN101_SOLVER_TIMEOUT_S", "5.0"))
 SOLVER_API_KEY = os.environ.get("SN101_SOLVER_API_KEY", "").strip()
+
+# How many tags to submit per forward. SN101's aggregator is `mean(top_k=3)`
+# where k=3 but the preprocessor also caps at 3, so extras can never be dropped
+# — submitting more than the bare minimum drags your mean down. 1 tag also
+# automatically gets diversity=1.0. Default=1 for max-per-round score.
+# Set SN101_MAX_TAGS_SUBMITTED=3 in the env file to revert to 3-tag behavior.
+MAX_TAGS_SUBMITTED = max(1, min(3, int(os.environ.get("SN101_MAX_TAGS_SUBMITTED", "1"))))
 SAFE_DEFAULT_TAGS = ["ai", "tech", "release"]
 
 
@@ -122,7 +129,7 @@ def solve_problem(envelope: Any, _runtime: Any) -> dict[str, Any]:
     task_id = str(getattr(envelope, "task_id", "?"))
 
     if not tweet:
-        result = list(SAFE_DEFAULT_TAGS)
+        result = list(SAFE_DEFAULT_TAGS)[:MAX_TAGS_SUBMITTED]
         _log_response(task_id=task_id, tweet="", tags=result,
                       path="no_tweet", solver_ms=0.0)
         return {"tags": result}
@@ -143,7 +150,9 @@ def solve_problem(envelope: Any, _runtime: Any) -> dict[str, Any]:
         tags = list(SAFE_DEFAULT_TAGS)
         path = f"{path}+empty_fallback"
 
-    final_tags = tags[:3]
+    # Submit only the top MAX_TAGS_SUBMITTED tags (default 1 = max single-round
+    # score under SN101's mean(top_k=3) aggregator).
+    final_tags = tags[:MAX_TAGS_SUBMITTED]
     _log_response(task_id=task_id, tweet=tweet, tags=final_tags,
                   path=path, solver_ms=solver_ms)
     return {"tags": final_tags}

@@ -26,6 +26,9 @@ os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("TQDM_DISABLE", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# These tests assume 3-tag returns. Force 3-tag mode in the test process so the
+# 1-tag production default in thin_miner.py doesn't break assertions.
+os.environ.setdefault("SN101_MAX_TAGS_SUBMITTED", "3")
 
 # Make `solver` and `thin_miner` importable when running this file directly.
 sys.path.insert(0, "/root/sn101-fleet")
